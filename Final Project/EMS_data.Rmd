@@ -1,0 +1,105 @@
+---
+title: "Final project option 2: EMS data analysis"
+author: "Soyoon Moon"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(dplyr)
+trauma <- read.csv(file="trauma_dataset.csv", header=TRUE)
+```
+
+The function glimpse prints out a summary of the data set:
+```{r}
+glimpse(trauma)
+```
+## Step 1: Variable selection and data cleaning
+In this report, I will be looking at the relationship between the total transport time from high income zipcodes and low income zipcodes.The explanatory variable is the median income and the response variable is the total transport time.
+
+In the research report provided as the background information, it talked about how there was a big discrepency in EMS transport times depending on the gender and economic status before more hospitals were built. I wanted to check if this was true; I wanted to see if there still was a discrepency with the variables that I chose. In this investigation, I defined the transport time as the time from EMS to the scene added with time from the scene to the hospital. I did not include the time at the scene because I thought the time spent at the scene may be affected by the status of each patient rather than the availability of EMS to the patients, which is the topic of this report.
+
+Also, while in the original report they defined the low income zipcodes as the ones with "the median income was below 200% of the federal poverty line for a family of 4", I took 20% highest and lowest income zipcodes and analyzed their transport time.
+
+```{r}
+total_transport_time<-rep(0,12891)
+median_income<-rep(0,12891)
+zipcode<-rep(0,12891)
+j<-1
+trauma<-na.omit(trauma) #data filter 
+for(i in 1:12891){ #12891 are the number of objects left in trauma data
+    total_transport_time[j]<-trauma$disp_scene[i] + trauma$depart_dest[i]
+    #time difference between departure and dispatch
+    median_income[j]<-trauma$median_income[j]
+    zipcode[j]<-trauma$scene_zip[j]  
+    j<-j+1
+}
+
+df<-data.frame(median_income,total_transport_time,zipcode)
+median_income_by_zipcode<-aggregate(df$median_income, list(df$zipcode), FUN=mean) #getting mean value of median income for each zipcode 
+time_by_zipcode<-aggregate(df$total_transport_time, list(df$zipcode), FUN=mean) #getting mean total transport time for each zipcode
+finaldf<-data.frame(median_income_by_zipcode$Group.1,median_income_by_zipcode$x,time_by_zipcode$x) #median income and tranport time for each zipcode
+```
+
+Explanation: The trauma data was first filtered using the omit function; incident with any NA value was filtered. This left 12891 values (number identified using the glimpse function). Using these values, I calculated the the average transport time for each zipcode.
+
+## Step 2: Data visualization
+
+```{r}
+ggplot(finaldf, aes(x = median_income_by_zipcode.x, y = time_by_zipcode.x)) +
+    geom_point()+ ggtitle("Median income vs. Total Transport Time \n for each zipcode in Chicago")+geom_smooth(method='lm')+xlab("Median income")+ylab("Transportation time")
+```
+
+When I graphed a scatterplot using the median income and average  transport time, there didn't seem like there was any distinct trend; linear regression line looks like it is slightly going down, but not so much. I wondered if this result was due to averaging of transportation time for each zipcode; there could have been a big outlier for some zipcodes that significantly increased or decreased the transportation time. Especially when there were fewer cases of accidents in some zipcodes, these outliers could have much bigger impact on skewing the data. So I decided to look more closely.
+
+## Step 3: Hypothesis testing or modeling
+```{r}
+#zipcode with lowest to highest income
+zipcode_by_income<-finaldf[order(finaldf$median_income_by_zipcode.x),]
+#zipcode with shortest to longest transport time
+zipcode_by_time<-finaldf[order(finaldf$time_by_zipcode.x),]
+#graph to see the relationship between median income and transportation time
+```
+Using the dataframe that contained mean transportation time and median income, new dataframes were made after sorting the time and income from lowest to highest value. This was done to figure out the zipcodes with the highest 20% and the lowest 20% median income. 
+
+From sorting the zipcodes with the median income, the 12 zipcodes with the lowest median incomes are 60621,60624,60644,60636,60637,60653,60649,60623,60827,60619,60609,60620. The 12 zipcodes with the highest median income are 60602,60603,60606,60604,60654,60605,60614,60661,60611,60608,60632,60629.
+
+I decided to further investigate by comparing the transport time of 12 zipcodes with the lowest median income and 12 zipcodes with the highest median income. 12 zipcodes were chosen because 12 was about 20% of the total number of zipcodes, which are 59.
+
+```{r}
+#transport time of zipcodes with the lowest median income
+lowest_median_income_transport <- subset(df,zipcode == c("60621","60624","60644","60636","60637","60653","60649","60623","60827
+","60619","60609","60620"))
+highest_median_income_transport <- subset(df,zipcode == c("60602","60603","60606","60604","60654","60605","60614","60661","60611","60608","60632","60629"))
+highest_and_lowest<-data.frame(category= c("Highest 20%","Lowest 20%" ) , value = c(highest_median_income_transport$total_transport_time,lowest_median_income_transport$total_transport_time))
+
+highest_and_lowest%>%
+  ggplot((aes(x=category, y=value))) + geom_boxplot() + ggtitle("Boxplot of highest 20% and lowest 20%") + ylab("Total transport time")
+summary(highest_median_income_transport$total_transport_time)
+summary(lowest_median_income_transport$total_transport_time)
+```
+Wow. From the bar plot, the median total transportation time looked like they were almost exactly the same. And when I checked with summary function, it actually was the same (hmmmmm maybe there was an error that I failed to catch). The mean was different though; the mean transport time for highest 20% income zipcodes were 928 seconds while for lowest 20% income zipcodes it was 748 seconds (About 180 seconds - 3 minutes!). The mean was different, but to check if the groups were actually different, t-test was conducted.
+
+```{r}
+glimpse(highest_median_income_transport)
+var(highest_median_income_transport$total_transport_time)
+glimpse(lowest_median_income_transport)
+var(lowest_median_income_transport$total_transport_time)
+```
+Data frame for the lowest 20% median income had 155 samples while the highest 20% median income had 353 samples; the variance for highest median income zipcode's transport time was 476723.8 while the variance for lowest 20% median income zipcode's transport time was only 65580. Because the sample sizes and the variances were so different, Welch's T-test was used.
+
+```{r}
+t.test(highest_median_income_transport$total_transport_time,lowest_median_income_transport$total_transport_time)
+```
+
+My null hypothesis was that there is no significant difference between the transport times of highest income and lowest income zipcodes. My alternative hypothesis was that there is a signficant difference, but I didn't specify which transport time was longer. 
+
+This was because when I read the research paper related to this topic, it sounded like the transport time is likely to be longer for the lower income zipcodes ("The disparity between Black and White non-Hispanic patients was reduced (mean [SD], 7.4 [5.1] vs 7.1[4.8] minutes" - even though the disparity decreased, transport time was still higher for low-income zipcodes) but with my graph above it seemed like the transport time seemed to be longer for the higher income zipcodes. 
+
+According to the Welch two sample t-test, p-value was 0.00195; as it is smaller than both 0.01 and 0.05, the null hypothesis is rejected. p-value of 0.00195 is the probability for us to observe this difference under the null hypothesis; which is currently very low.
+
+## Conclusion
+In conclusion, two groups (highest 20% income zipcodes and lowest 20% income zipcodes) have significantly different transportation time samples. This was surprising because the result is different from what the research paper said. There could have been many limitations in my analysis; maybe I should have included the time spent on site in the total transportation time, or maybe I included more zipcode samples than the research paper.
+
+There were other assumptions, including those when using the t-test. Though the sample sizes are big enough, I assumed that the sample isn't too skewed and is close to the normal distribution. Anyhow, I found that transportation time was significantly longer for cases at higher income zipcodes. This may be due to improvement in having hospital access, or just limitation in my analysis.
+
